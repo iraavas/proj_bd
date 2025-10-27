@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # === PostgreSQL ===
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-pg.sql:/docker-entrypoint-initdb.d/init-pg.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # === MongoDB ===
+  mongo:
+    image: mongo:7.0.25
+    container_name: mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: rootuser
+      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+      MONGO_INITDB_DATABASE: mydb
+    volumes:
+      - mongo_data:/data/db
+      - ./init-mongodb/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "rootuser", "-p", "rootpassword", "--authenticationDatabase", "admin", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+    restart: unless-stopped
+
+  # === Redis ===
+  redis:
+    image: redis:7.2.4
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./init-redis.sh:/init-redis.sh:ro
+    command: >
+      sh -c '
+        echo "Запуск Redis в фоне..." &&
+        redis-server --appendonly yes &
+        REDIS_PID=$! &&
+        echo "Ожидание запуска Redis (PID: $$REDIS_PID)..." &&
+        until redis-cli -h redis ping > /dev/null 2>&1; do
+          echo "Redis не готов, ждём 2 секунды..."
+          sleep 2
+        done &&
+        echo "Redis готов! Запуск инициализации..." &&
+        sh /init-redis.sh &&
+        echo "Инициализация завершена. Redis работает (PID: $$REDIS_PID)..." &&
+        wait $$REDIS_PID
+      '
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "redis", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# === Volumes ===
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
